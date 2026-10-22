@@ -75,10 +75,10 @@ impl App {
         csv_path: PathBuf,
         rt_handle: tokio::runtime::Handle,
         event_tx: mpsc::Sender<AppEvent>,
+        db_config: DbConfig,
     ) -> Result<Self> {
         let people = store::load(&csv_path)?;
-        let cfg = db::load_config();
-        let settings = SettingsState::from_config(&cfg);
+        let settings = SettingsState::from_config(&db_config);
         let app = Self {
             page: Page::Entry,
             people,
@@ -93,8 +93,8 @@ impl App {
             event_tx,
             quit_armed_at: None,
         };
-        if cfg.is_usable() {
-            app.spawn_connect(cfg);
+        if db_config.is_usable() {
+            app.spawn_connect(db_config);
         }
         Ok(app)
     }
@@ -355,10 +355,17 @@ impl App {
     fn spawn_connect(&self, cfg: DbConfig) {
         let tx = self.event_tx.clone();
         self.rt_handle.spawn(async move {
-            let conn = match db::connect(&cfg).await {
-                Ok(conn) => conn,
-                Err(e) => {
+            let conn = match tokio::time::timeout(Duration::from_secs(10), db::connect(&cfg)).await
+            {
+                Ok(Ok(conn)) => conn,
+                Ok(Err(e)) => {
                     let _ = tx.send(AppEvent::DbStatus(ConnStatus::Failed(e.to_string())));
+                    return;
+                }
+                Err(_) => {
+                    let _ = tx.send(AppEvent::DbStatus(ConnStatus::Failed(
+                        "Connection timed out after 10s — check the URL".to_string(),
+                    )));
                     return;
                 }
             };
@@ -465,7 +472,7 @@ mod tests {
             crate::avatar::random_seed()
         ));
         let _ = std::fs::remove_file(&csv_path);
-        let app = App::new(csv_path, rt.handle().clone(), tx).unwrap();
+        let app = App::new(csv_path, rt.handle().clone(), tx, crate::db::DbConfig::default()).unwrap();
         (app, rt)
     }
 

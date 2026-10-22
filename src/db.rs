@@ -14,6 +14,7 @@
 //! tight loop) rather than re-fetching the whole table.
 
 use color_eyre::Result;
+use color_eyre::eyre::bail;
 use libsql::{Builder, Connection};
 
 use crate::person::{Gender, Person};
@@ -76,6 +77,18 @@ pub fn save_config(cfg: &DbConfig) -> Result<()> {
 }
 
 pub async fn connect(cfg: &DbConfig) -> Result<Connection> {
+    // Turso URLs look like `libsql://<db>-<org>.turso.io` (or `https://`);
+    // catching an obviously wrong scheme here gives a clear message instead
+    // of a deep HTTP/TLS stack trace.
+    if !(cfg.url.starts_with("libsql://")
+        || cfg.url.starts_with("https://")
+        || cfg.url.starts_with("http://"))
+    {
+        bail!(
+            "database URL should start with libsql:// or https:// (got {:?})",
+            cfg.url
+        );
+    }
     let db = Builder::new_remote(cfg.url.clone(), cfg.token.clone())
         .build()
         .await?;
@@ -268,5 +281,19 @@ mod tests {
 
         assert_eq!(loaded, cfg);
         assert!(loaded.is_usable());
+    }
+
+    /// Regression test for the TLS-feature panic this module's `tls`
+    /// Cargo feature now avoids: whatever is wrong with the config,
+    /// `connect` must return an `Err`, never panic. This case (an
+    /// obviously malformed URL) is checked without touching the network.
+    #[tokio::test]
+    async fn connect_with_bad_url_scheme_errors_instead_of_panicking() {
+        let cfg = DbConfig {
+            url: "not-a-url".to_string(),
+            token: "token".to_string(),
+        };
+        let result = connect(&cfg).await;
+        assert!(result.is_err());
     }
 }
