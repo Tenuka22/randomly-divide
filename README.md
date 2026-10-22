@@ -6,8 +6,13 @@ database.
 
 ## Pages
 
-`F1`/`F2`/`F3`/`F4` switch pages. `q` quits (Add Person modal: `Esc` instead,
-so `q` can be typed into a name).
+`F1`/`F2`/`F3`/`F4` switch pages. Press `q` twice (within 3s) to quit —
+this also makes a paste that happens to contain the letter "q" harmless.
+On Settings, `q` always types into the focused field instead; use `Ctrl+C`
+to quit from there. Clipboard paste (`Ctrl+V`) is handled via bracketed
+paste and goes straight into the focused text field — it's never
+interpreted as individual keystrokes, so it can't accidentally trigger a
+keybind.
 
 - **Entry** — roster list + `a` opens **Add Person**.
 - **Groups** — `j`/`k` pick the group half (1-5 / 6-10), `1`-`5` pick a group

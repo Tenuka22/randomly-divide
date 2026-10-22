@@ -93,6 +93,13 @@ impl SettingsState {
         SettingsOutcome::None
     }
 
+    /// Insert pasted text into whichever field has focus, stripping control
+    /// characters.
+    pub fn paste(&mut self, text: &str) {
+        let clean: String = text.chars().filter(|c| !c.is_control()).collect();
+        self.field_mut().push_str(&clean);
+    }
+
     fn field_mut(&mut self) -> &mut String {
         match self.focus {
             Focus::Url => &mut self.url,

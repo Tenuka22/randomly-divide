@@ -61,6 +61,18 @@ impl AddPersonState {
         Gender::ALL[self.gender_idx]
     }
 
+    /// Insert pasted text into whichever text field has focus. Control
+    /// characters (including embedded newlines) are stripped; School and
+    /// Gender are selectors, not text, so paste is a no-op there.
+    pub fn paste(&mut self, text: &str) {
+        let clean: String = text.chars().filter(|c| !c.is_control()).collect();
+        match self.focus {
+            Focus::Name => self.name.push_str(&clean),
+            Focus::Class => self.class.push_str(&clean),
+            Focus::School | Focus::Gender => {}
+        }
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) -> AddPersonOutcome {
         if !self.open {
             return AddPersonOutcome::None;

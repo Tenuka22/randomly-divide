@@ -55,12 +55,12 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
 
 fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
     let hint = match app.page {
-        Page::Entry => "a add person · q quit",
+        Page::Entry => "a add person · qq quit",
         Page::Groups => {
-            "j/k half 1-5|6-10 · 1-5 pick group · Shift+1-9 pick member · o/p top/bottom · d/Del remove · q quit"
+            "j/k half 1-5|6-10 · 1-5 pick group · Shift+1-9 pick member · o/p top/bottom · d/Del remove · qq quit"
         }
-        Page::Stats => "F1/F2/F3/F4 switch page · q quit",
-        Page::Settings => "Tab switch field · type to edit · Ctrl+S save & connect · Ctrl+R rotate secret · q quit",
+        Page::Stats => "F1/F2/F3/F4 switch page · qq quit",
+        Page::Settings => "Tab switch field · type to edit · Ctrl+S save & connect · Ctrl+R rotate secret · Ctrl+C quit",
     };
 
     let line = if let Some(status) = &app.status {

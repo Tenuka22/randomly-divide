@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
@@ -39,6 +39,10 @@ pub struct Status {
 /// thread, and database sync results from the background tokio task.
 pub enum AppEvent {
     Key(KeyEvent),
+    /// Bracketed-paste text, delivered as one chunk instead of a flood of
+    /// synthetic keystrokes (which would otherwise let pasted text trigger
+    /// keybinds like `q` and quit the app mid-paste).
+    Paste(String),
     Redraw,
     DbStatus(ConnStatus),
     /// A freshly opened connection, handed back so writes can be mirrored.
@@ -62,6 +66,8 @@ pub struct App {
     db_conn: Option<Connection>,
     rt_handle: tokio::runtime::Handle,
     event_tx: mpsc::Sender<AppEvent>,
+    /// When the first `q` of a double-tap-to-quit was pressed, if any.
+    quit_armed_at: Option<Instant>,
 }
 
 impl App {
@@ -85,6 +91,7 @@ impl App {
             db_conn: None,
             rt_handle,
             event_tx,
+            quit_armed_at: None,
         };
         if cfg.is_usable() {
             app.spawn_connect(cfg);
@@ -107,6 +114,7 @@ impl App {
         match event {
             AppEvent::Key(key) if key.kind == KeyEventKind::Press => self.handle_key(key)?,
             AppEvent::Key(_) | AppEvent::Redraw => {}
+            AppEvent::Paste(text) => self.handle_paste(&text),
             AppEvent::DbStatus(status) => self.settings.status = status,
             AppEvent::DbConnected(conn) => self.db_conn = Some(conn),
             AppEvent::DbSnapshot(people) => self.apply_snapshot(people)?,
@@ -138,6 +146,34 @@ impl App {
             self.exit = true;
             return Ok(());
         }
+
+        // Double-tap `q` to quit. Skipped entirely on Settings, where `q`
+        // needs to type into the URL/token fields instead — Ctrl+C is the
+        // universal hard-quit from there (and everywhere else).
+        let quit_eligible = self.page != Page::Settings;
+        let bare_q = key.code == KeyCode::Char('q') && key.modifiers.is_empty();
+        if quit_eligible && bare_q {
+            let armed_recently = self
+                .quit_armed_at
+                .is_some_and(|at| at.elapsed() < Duration::from_secs(3));
+            if armed_recently {
+                self.exit = true;
+            } else {
+                self.quit_armed_at = Some(Instant::now());
+                self.status = Some(Status {
+                    text: "Press q again to quit".to_string(),
+                    kind: StatusKind::Error,
+                });
+            }
+            return Ok(());
+        }
+        // Any other key cancels a pending quit confirmation, and clears the
+        // "press q again" hint so it doesn't linger looking like it's still
+        // armed.
+        if self.quit_armed_at.take().is_some() {
+            self.status = None;
+        }
+
         match key.code {
             KeyCode::F(1) => {
                 self.page = Page::Entry;
@@ -157,10 +193,6 @@ impl App {
             KeyCode::F(4) => {
                 self.page = Page::Settings;
                 self.status = None;
-                return Ok(());
-            }
-            KeyCode::Char('q') => {
-                self.exit = true;
                 return Ok(());
             }
             KeyCode::Char('a') if self.page == Page::Entry => {
@@ -201,6 +233,17 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    /// Route a bracketed paste into whatever text field currently has
+    /// focus; ignored when there's nowhere sensible to put it (e.g. the
+    /// Groups page, or the School/Gender selectors in the modal).
+    fn handle_paste(&mut self, text: &str) {
+        if self.add_person.open {
+            self.add_person.paste(text);
+        } else if self.page == Page::Settings {
+            self.settings.paste(text);
+        }
     }
 
     fn add_person(
@@ -395,6 +438,11 @@ pub fn spawn_input_thread(tx: mpsc::Sender<AppEvent>) {
                         return;
                     }
                 }
+                Ok(Event::Paste(text)) => {
+                    if tx.send(AppEvent::Paste(text)).is_err() {
+                        return;
+                    }
+                }
                 Ok(_) => {}
                 Err(_) => return,
             }
@@ -474,5 +522,80 @@ mod tests {
         terminal.draw(|frame| ui::draw(frame, &app)).unwrap();
 
         let _ = std::fs::remove_file(&app.csv_path);
+    }
+
+    /// Regression test: pasting a clipboard blob that happens to contain
+    /// 'q' must never quit the app. Before bracketed-paste routing, pasted
+    /// text was delivered as a flood of synthetic keystrokes and any 'q'
+    /// in it triggered the global quit handler.
+    #[test]
+    fn pasting_text_containing_q_does_not_quit_or_leak_into_the_wrong_field() {
+        let (mut app, _rt) = test_app();
+
+        // On a page with no text field, paste is simply dropped.
+        app.page = Page::Groups;
+        app.handle_paste("quit this app please q q q");
+        assert!(!app.exit);
+
+        // Inside the Add Person modal, paste lands in the focused field
+        // verbatim — not interpreted as keystrokes.
+        app.page = Page::Entry;
+        app.add_person.open();
+        app.handle_paste("Quincy O'Brien");
+        assert!(!app.exit);
+        assert_eq!(app.add_person.name, "Quincy O'Brien");
+
+        let _ = std::fs::remove_file(&app.csv_path);
+    }
+
+    fn key(code: crossterm::event::KeyCode) -> KeyEvent {
+        use crossterm::event::{KeyEventState, KeyModifiers};
+        KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
+    }
+
+    #[test]
+    fn single_q_arms_but_does_not_quit() {
+        use crossterm::event::KeyCode;
+        let (mut app, _rt) = test_app();
+        app.handle_key(key(KeyCode::Char('q'))).unwrap();
+        assert!(!app.exit);
+        assert!(app.quit_armed_at.is_some());
+    }
+
+    #[test]
+    fn second_q_within_the_window_quits() {
+        use crossterm::event::KeyCode;
+        let (mut app, _rt) = test_app();
+        app.handle_key(key(KeyCode::Char('q'))).unwrap();
+        app.handle_key(key(KeyCode::Char('q'))).unwrap();
+        assert!(app.exit);
+    }
+
+    #[test]
+    fn any_other_key_disarms_the_pending_quit() {
+        use crossterm::event::KeyCode;
+        let (mut app, _rt) = test_app();
+        app.handle_key(key(KeyCode::Char('q'))).unwrap();
+        assert!(app.quit_armed_at.is_some());
+        app.handle_key(key(KeyCode::F(2))).unwrap();
+        assert!(app.quit_armed_at.is_none());
+        // A lone follow-up `q` is now a fresh first tap, not a quit.
+        app.handle_key(key(KeyCode::Char('q'))).unwrap();
+        assert!(!app.exit);
+    }
+
+    #[test]
+    fn settings_page_types_q_into_the_focused_field_instead_of_quitting() {
+        use crossterm::event::KeyCode;
+        let (mut app, _rt) = test_app();
+        app.page = Page::Settings;
+        app.handle_key(key(KeyCode::Char('q'))).unwrap();
+        assert!(!app.exit);
+        assert_eq!(app.settings.url, "q");
     }
 }
