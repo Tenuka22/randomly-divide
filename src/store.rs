@@ -47,8 +47,24 @@ mod tests {
     fn save_then_load_round_trips_exactly() {
         let path = std::env::temp_dir().join("randomly-divide-test-roundtrip.csv");
         let people = vec![
-            Person { id: 1, name: "Amal".into(), school: "Southlands".into(), group: 3 },
-            Person { id: 2, name: "Nimal".into(), school: "Convent".into(), group: 10 },
+            Person {
+                id: 1,
+                name: "Amal".into(),
+                class: "8-B".into(),
+                school: "Southlands".into(),
+                gender: crate::person::Gender::Male,
+                group: 3,
+                avatar_seed: 111,
+            },
+            Person {
+                id: 2,
+                name: "Nimal".into(),
+                class: "9-A".into(),
+                school: "Convent".into(),
+                gender: crate::person::Gender::Female,
+                group: 10,
+                avatar_seed: 222,
+            },
         ];
         save(&path, &people).unwrap();
         let loaded = load(&path).unwrap();
@@ -58,8 +74,11 @@ mod tests {
         for (a, b) in loaded.iter().zip(people.iter()) {
             assert_eq!(a.id, b.id);
             assert_eq!(a.name, b.name);
+            assert_eq!(a.class, b.class);
             assert_eq!(a.school, b.school);
+            assert_eq!(a.gender, b.gender);
             assert_eq!(a.group, b.group);
+            assert_eq!(a.avatar_seed, b.avatar_seed);
         }
     }
 }

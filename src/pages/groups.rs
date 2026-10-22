@@ -164,8 +164,11 @@ mod tests {
                 people.push(Person {
                     id,
                     name: format!("P{id}-{i}"),
+                    class: "8-B".to_string(),
                     school: "Southlands".to_string(),
+                    gender: crate::person::Gender::Male,
                     group,
+                    avatar_seed: id,
                 });
                 id += 1;
             }
@@ -307,9 +310,17 @@ pub fn render(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, app: &cra
         .iter()
         .enumerate()
         .map(|(row, person)| {
+            let gender_color = match person.gender {
+                crate::person::Gender::Male => Color::Blue,
+                crate::person::Gender::Female => Color::Magenta,
+            };
             let line = Line::from(vec![
                 Span::styled(format!("{:>2}. ", row + 1), Style::new().fg(Color::DarkGray)),
+                Span::styled("██ ", Style::new().fg(crate::avatar::color(person.avatar_seed))),
+                Span::styled(format!("{} ", person.gender.short()), Style::new().fg(gender_color).bold()),
                 Span::styled(person.name.clone(), Style::new().bold()),
+                Span::raw("  "),
+                Span::styled(format!("Class {}", person.class), Style::new().fg(Color::DarkGray)),
                 Span::raw("  "),
                 Span::styled(person.school.clone(), Style::new().fg(Color::DarkGray)),
             ]);
