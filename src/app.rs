@@ -12,7 +12,7 @@ use crate::pages::add_person::{AddPersonOutcome, AddPersonState};
 use crate::pages::groups::{GroupsOutcome, GroupsState};
 use crate::pages::settings::{ConnStatus, SettingsOutcome, SettingsState};
 use crate::person::Person;
-use crate::random::random_group;
+use crate::random::pick_group;
 use crate::{store, ui};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -255,7 +255,13 @@ impl App {
         avatar_seed: u64,
     ) -> Result<()> {
         let id = self.people.iter().map(|p| p.id).max().unwrap_or(0) + 1;
-        let group = random_group();
+        let Some(group) = pick_group(&self.people, gender, &school) else {
+            self.status = Some(Status {
+                text: format!("No free group for {} — every group is held by the other gender", gender.label()),
+                kind: StatusKind::Error,
+            });
+            return Ok(());
+        };
         let person = Person {
             id,
             name: name.clone(),
